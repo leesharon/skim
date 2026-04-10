@@ -40,6 +40,48 @@ impl SearchField {
             Self::StringLiteral => 0.5,
         }
     }
+
+    /// Convert to a compact `u8` for on-disk posting entries.
+    ///
+    /// Stable mapping — must not change between index format versions.
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::TypeDefinition => 0,
+            Self::FunctionSignature => 1,
+            Self::SymbolName => 2,
+            Self::ImportExport => 3,
+            Self::FunctionBody => 4,
+            Self::Comment => 5,
+            Self::StringLiteral => 6,
+        }
+    }
+
+    /// Reconstruct from `u8`. Returns `None` for unknown values.
+    pub fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Self::TypeDefinition),
+            1 => Some(Self::FunctionSignature),
+            2 => Some(Self::SymbolName),
+            3 => Some(Self::ImportExport),
+            4 => Some(Self::FunctionBody),
+            5 => Some(Self::Comment),
+            6 => Some(Self::StringLiteral),
+            _ => None,
+        }
+    }
+
+    /// Return all variants in discriminant order.
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::TypeDefinition,
+            Self::FunctionSignature,
+            Self::SymbolName,
+            Self::ImportExport,
+            Self::FunctionBody,
+            Self::Comment,
+            Self::StringLiteral,
+        ]
+    }
 }
 
 /// Temporal filter flags for query-time filtering by git activity signals.
@@ -69,7 +111,7 @@ pub struct TemporalFlags {
 ///
 /// let q = SearchQuery::text("parse_file").with_limit(20);
 /// ```
-#[must_use]
+#[must_use = "a SearchQuery does nothing unless passed to a search index"]
 #[derive(Debug, Clone)]
 pub struct SearchQuery {
     /// Free-text query string for lexical matching.
@@ -149,21 +191,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_search_query_new_defaults() {
+    fn search_query_new_defaults() {
         let q = SearchQuery::new();
-        assert!(q.text_query.is_none());
+        assert_eq!(q.text_query, None);
+        assert_eq!(q.ast_pattern, None);
         assert_eq!(q.limit, 50);
         assert_eq!(q.offset, 0);
+        assert!(!q.temporal_flags.blast_radius);
+        assert!(!q.temporal_flags.hot);
+        assert!(!q.temporal_flags.cold);
+        assert!(!q.temporal_flags.risky);
     }
 
     #[test]
-    fn test_search_query_text_convenience() {
-        let q = SearchQuery::text("foo");
-        assert_eq!(q.text_query, Some("foo".to_string()));
+    fn search_query_text_convenience() {
+        let q = SearchQuery::text("parse_file");
+        assert_eq!(q.text_query, Some("parse_file".to_string()));
+        // All other fields remain at defaults.
+        assert_eq!(q.limit, 50);
+        assert_eq!(q.offset, 0);
+        assert_eq!(q.ast_pattern, None);
     }
 
     #[test]
-    fn test_search_query_builder_chain() {
+    fn temporal_flags_default_all_false() {
+        let flags = TemporalFlags::default();
+        assert!(!flags.blast_radius);
+        assert!(!flags.hot);
+        assert!(!flags.cold);
+        assert!(!flags.risky);
+    }
+
+    #[test]
+    fn search_query_builder_chain() {
         let flags = TemporalFlags {
             hot: true,
             ..Default::default()
@@ -184,22 +244,33 @@ mod tests {
     }
 
     #[test]
-    fn test_search_field_boost_values() {
-        assert_eq!(SearchField::TypeDefinition.default_boost(), 5.0);
-        assert_eq!(SearchField::FunctionSignature.default_boost(), 4.0);
-        assert_eq!(SearchField::SymbolName.default_boost(), 3.5);
-        assert_eq!(SearchField::ImportExport.default_boost(), 3.0);
-        assert_eq!(SearchField::FunctionBody.default_boost(), 1.0);
-        assert_eq!(SearchField::Comment.default_boost(), 0.8);
-        assert_eq!(SearchField::StringLiteral.default_boost(), 0.5);
+    fn field_boost_exact_values() {
+        // These exact values are the contract for BM25F scoring weights.
+        // Changing them is a breaking change to search quality.
+        assert!((SearchField::TypeDefinition.default_boost() - 5.0).abs() < f32::EPSILON);
+        assert!((SearchField::FunctionSignature.default_boost() - 4.0).abs() < f32::EPSILON);
+        assert!((SearchField::SymbolName.default_boost() - 3.5).abs() < f32::EPSILON);
+        assert!((SearchField::ImportExport.default_boost() - 3.0).abs() < f32::EPSILON);
+        assert!((SearchField::FunctionBody.default_boost() - 1.0).abs() < f32::EPSILON);
+        assert!((SearchField::Comment.default_boost() - 0.8).abs() < f32::EPSILON);
+        assert!((SearchField::StringLiteral.default_boost() - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn test_temporal_flags_default() {
-        let flags = TemporalFlags::default();
-        assert!(!flags.blast_radius);
-        assert!(!flags.hot);
-        assert!(!flags.cold);
-        assert!(!flags.risky);
+    fn field_boosts_rank_type_definition_highest() {
+        // Verify the ordering assumption that scoring relies on.
+        assert!(
+            SearchField::TypeDefinition.default_boost()
+                > SearchField::FunctionSignature.default_boost()
+        );
+        assert!(
+            SearchField::FunctionSignature.default_boost()
+                > SearchField::SymbolName.default_boost()
+        );
+        assert!(
+            SearchField::SymbolName.default_boost() > SearchField::ImportExport.default_boost()
+        );
+        assert!(SearchField::FunctionBody.default_boost() > SearchField::Comment.default_boost());
+        assert!(SearchField::Comment.default_boost() > SearchField::StringLiteral.default_boost());
     }
 }

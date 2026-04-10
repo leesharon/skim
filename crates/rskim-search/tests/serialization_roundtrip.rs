@@ -273,10 +273,20 @@ fn test_file_table_unnormalized_paths_idempotent_after_roundtrip() {
     let re_a = rt.register(Path::new("./src/main.rs"));
     let re_b = rt.register(Path::new("src/lib.rs")); // already-normalized form
     let re_c = rt.register(Path::new("./tests/test.rs"));
-    assert_eq!(re_a, id_a, "unnormalized re-register must return existing id");
+    assert_eq!(
+        re_a, id_a,
+        "unnormalized re-register must return existing id"
+    );
     assert_eq!(re_b, id_b, "normalized re-register must return existing id");
-    assert_eq!(re_c, id_c, "unnormalized re-register must return existing id");
-    assert_eq!(rt.len(), 3, "no duplicate entries after re-registering unnormalized paths");
+    assert_eq!(
+        re_c, id_c,
+        "unnormalized re-register must return existing id"
+    );
+    assert_eq!(
+        rt.len(),
+        3,
+        "no duplicate entries after re-registering unnormalized paths"
+    );
 }
 
 /// Serialized form of a FileTable registered with unnormalized paths must store
@@ -381,7 +391,7 @@ fn test_search_error_display_io() {
 
 #[test]
 fn test_search_error_display_index() {
-    let err = rskim_search::SearchError::IndexError("corrupt".to_string());
+    let err = rskim_search::SearchError::IndexBuildError("corrupt".to_string());
     assert_eq!(format!("{err}"), "Index error: corrupt");
 }
 

@@ -47,11 +47,11 @@ fn test_question_mark_skim_error() {
 
 #[test]
 fn test_search_error_non_exhaustive_match() {
-    let err = SearchError::IndexError("test".to_string());
+    let err = SearchError::IndexBuildError("test".to_string());
     // Wildcard arm required by #[non_exhaustive]
     match err {
         SearchError::Io(_) => panic!("wrong variant"),
-        SearchError::IndexError(_) => {} // expected
+        SearchError::IndexBuildError(_) => {} // expected
         SearchError::InvalidQuery(_) => panic!("wrong variant"),
         SearchError::CoreError(_) => panic!("wrong variant"),
         SearchError::SerializationError(_) => panic!("wrong variant"),
@@ -86,4 +86,52 @@ fn test_search_error_core_source_chain() {
         .expect("source should exist")
         .downcast_ref::<rskim_core::SkimError>()
         .is_some());
+}
+
+// ============================================================================
+// CorruptedIndex — Display format and source() chain
+// ============================================================================
+
+#[test]
+fn corrupted_index_display_includes_path_and_reason() {
+    let err = SearchError::CorruptedIndex {
+        path: "/some/path/lexical.skidx".to_string(),
+        reason: "invalid magic bytes".to_string(),
+    };
+    let display = format!("{err}");
+    assert!(
+        display.contains("/some/path/lexical.skidx"),
+        "Display must include path, got: {display}"
+    );
+    assert!(
+        display.contains("invalid magic bytes"),
+        "Display must include reason, got: {display}"
+    );
+}
+
+#[test]
+fn corrupted_index_display_format_matches_template() {
+    let err = SearchError::CorruptedIndex {
+        path: "lexical.skidx".to_string(),
+        reason: "unsupported version: 99".to_string(),
+    };
+    // The thiserror template is: "Corrupted index at {path}: {reason}"
+    let display = format!("{err}");
+    assert!(
+        display.starts_with("Corrupted index at"),
+        "Display must start with 'Corrupted index at', got: {display}"
+    );
+}
+
+#[test]
+fn corrupted_index_source_chain_is_none() {
+    // CorruptedIndex has no #[from] or #[source] annotation, so source() is None.
+    let err = SearchError::CorruptedIndex {
+        path: "lexical.skidx".to_string(),
+        reason: "truncated header".to_string(),
+    };
+    assert!(
+        err.source().is_none(),
+        "CorruptedIndex has no inner error, source() must be None"
+    );
 }
